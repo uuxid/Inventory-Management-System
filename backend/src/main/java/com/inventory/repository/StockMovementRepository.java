@@ -33,7 +33,7 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
 
     @Query(value = """
             SELECT sm.movement_type, SUM(sm.quantity) as qty FROM stock_movements sm 
-            WHERE sm.created_at >= :since AND sm.movement_type IN ('IN', 'OUT') 
+          WHERE sm.created_at >= :since 
             GROUP BY sm.movement_type
             """, nativeQuery = true)
     List<Object[]> aggregateMovementsByType(@Param("since") LocalDateTime since);

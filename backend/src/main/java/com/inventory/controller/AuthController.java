@@ -20,6 +20,7 @@ import com.inventory.service.AuthService;
 
 import lombok.RequiredArgsConstructor;
 
+
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -50,4 +51,6 @@ public class AuthController {
     public ResponseEntity<List<UserDTO>> getAllUsers() {
         return ResponseEntity.ok(authService.getAllUsers());
     }
+
+    
 }

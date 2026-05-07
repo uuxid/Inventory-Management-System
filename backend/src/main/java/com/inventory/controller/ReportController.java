@@ -1,18 +1,31 @@
 package com.inventory.controller;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.inventory.model.Product;
 import com.inventory.model.StockMovement;
 import com.inventory.repository.ProductRepository;
 import com.inventory.repository.StockMovementRepository;
-import lombok.RequiredArgsConstructor;
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-import org.springframework.http.*;
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
 
-import java.io.ByteArrayOutputStream;
-import java.util.List;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/reports")
@@ -26,57 +39,44 @@ public class ReportController {
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
     public ResponseEntity<byte[]> exportProducts() throws Exception {
         List<Product> products = productRepo.findByIsActiveTrue();
+        StringBuilder doc = new StringBuilder();
+        doc.append("<html><head><meta charset='UTF-8'/><style>")
+                .append("body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#111827;}")
+                .append("h2{margin:0 0 12px 0;}")
+                .append("table{border-collapse:collapse;width:100%;}")
+                .append("th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;}")
+                .append("th{background:#e2e8f0;font-weight:700;}")
+                .append("</style></head><body>")
+                .append("<h2>Inventory Products Report</h2>")
+                .append("<table><thead><tr>")
+                .append("<th>ID</th><th>Name</th><th>SKU</th><th>Barcode</th><th>Category</th><th>Supplier</th>")
+                .append("<th>Unit Price</th><th>Cost Price</th><th>Qty on Hand</th><th>Reorder Level</th><th>Location</th><th>Valuation</th>")
+                .append("</tr></thead><tbody>");
 
-        try (Workbook wb = new XSSFWorkbook()) {
-            Sheet sheet = wb.createSheet("Products");
-
-            // Header style
-            CellStyle headerStyle = wb.createCellStyle();
-            Font font = wb.createFont();
-            font.setBold(true);
-            headerStyle.setFont(font);
-            headerStyle.setFillForegroundColor(IndexedColors.LIGHT_BLUE.getIndex());
-            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-
-            // Header row
-            String[] headers = {"ID","Name","SKU","Barcode","Category","Supplier",
-                    "Unit Price","Cost Price","Qty on Hand","Reorder Level","Location","Valuation"};
-            Row headerRow = sheet.createRow(0);
-            for (int i = 0; i < headers.length; i++) {
-                Cell cell = headerRow.createCell(i);
-                cell.setCellValue(headers[i]);
-                cell.setCellStyle(headerStyle);
-                sheet.setColumnWidth(i, 4000);
-            }
-
-            // Data rows
-            int rowNum = 1;
-            for (Product p : products) {
-                Row row = sheet.createRow(rowNum++);
-                row.createCell(0).setCellValue(p.getId());
-                row.createCell(1).setCellValue(p.getName());
-                row.createCell(2).setCellValue(p.getSku());
-                row.createCell(3).setCellValue(p.getBarcode() != null ? p.getBarcode() : "");
-                row.createCell(4).setCellValue(p.getCategory() != null ? p.getCategory().getName() : "");
-                row.createCell(5).setCellValue(p.getSupplier() != null ? p.getSupplier().getName() : "");
-                row.createCell(6).setCellValue(p.getUnitPrice().doubleValue());
-                row.createCell(7).setCellValue(p.getCostPrice().doubleValue());
-                row.createCell(8).setCellValue(p.getQuantityOnHand());
-                row.createCell(9).setCellValue(p.getReorderLevel());
-                row.createCell(10).setCellValue(p.getLocation() != null ? p.getLocation() : "");
-                row.createCell(11).setCellValue(p.getValuationMethod().name());
-            }
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            wb.write(out);
-
-            HttpHeaders respHeaders = new HttpHeaders();
-            respHeaders.setContentType(MediaType.parseMediaType(
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
-            respHeaders.setContentDispositionFormData("attachment", "products-export.xlsx");
-
-            return ResponseEntity.ok().headers(respHeaders).body(out.toByteArray());
+        for (Product p : products) {
+            doc.append("<tr>")
+                    .append("<td>").append(p.getId() != null ? p.getId() : "").append("</td>")
+                    .append("<td>").append(escapeHtml(p.getName())).append("</td>")
+                    .append("<td>").append(escapeHtml(p.getSku())).append("</td>")
+                    .append("<td>").append(escapeHtml(p.getBarcode())).append("</td>")
+                    .append("<td>").append(escapeHtml(p.getCategory() != null ? p.getCategory().getName() : null)).append("</td>")
+                    .append("<td>").append(escapeHtml(p.getSupplier() != null ? p.getSupplier().getName() : null)).append("</td>")
+                    .append("<td>").append(p.getUnitPrice() != null ? p.getUnitPrice() : "").append("</td>")
+                    .append("<td>").append(p.getCostPrice() != null ? p.getCostPrice() : "").append("</td>")
+                    .append("<td>").append(p.getQuantityOnHand() != null ? p.getQuantityOnHand() : "").append("</td>")
+                    .append("<td>").append(p.getReorderLevel() != null ? p.getReorderLevel() : "").append("</td>")
+                    .append("<td>").append(escapeHtml(p.getLocation())).append("</td>")
+                    .append("<td>").append(p.getValuationMethod() != null ? p.getValuationMethod().name() : "").append("</td>")
+                    .append("</tr>");
         }
+
+        doc.append("</tbody></table></body></html>");
+
+        HttpHeaders respHeaders = new HttpHeaders();
+        respHeaders.setContentType(MediaType.parseMediaType("application/msword; charset=UTF-8"));
+        respHeaders.setContentDisposition(ContentDisposition.attachment().filename("products-export.doc").build());
+
+        return ResponseEntity.ok().headers(respHeaders).body(doc.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     @GetMapping("/stock-movements/export")
@@ -123,5 +123,17 @@ public class ReportController {
 
             return ResponseEntity.ok().headers(respHeaders).body(out.toByteArray());
         }
+    }
+
+    private String escapeHtml(String input) {
+        if (input == null) {
+            return "";
+        }
+        return input
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }

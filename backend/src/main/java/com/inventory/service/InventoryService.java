@@ -140,18 +140,29 @@ public class InventoryService {
         LocalDateTime since = LocalDateTime.now().minusDays(Math.max(days, 1));
         List<Object[]> results = movementRepo.aggregateMovementsByType(since);
         
-        long received = 0, sold = 0;
+        long received = 0, sold = 0, returns = 0, transfers = 0, adjustments = 0;
         if (results != null) {
             for (Object[] row : results) {
                 if (row.length >= 2) {
                     String movementType = row[0] != null ? row[0].toString().trim().toUpperCase() : "";
                     Number qtyNum = (Number) row[1];
                     long qty = qtyNum != null ? qtyNum.longValue() : 0L;
-                    
-                    if ("IN".equals(movementType)) {
-                        received = qty;
-                    } else if ("OUT".equals(movementType)) {
-                        sold = qty;
+
+                    switch (movementType) {
+                        case "IN" -> received += qty;
+                        case "RETURN" -> {
+                            received += qty;
+                            returns += qty;
+                        }
+                        case "OUT" -> sold += qty;
+                        case "TRANSFER" -> {
+                            sold += qty;
+                            transfers += qty;
+                        }
+                        case "ADJUSTMENT" -> adjustments += qty;
+                        default -> {
+                            // Ignore unknown movement types to keep response stable.
+                        }
                     }
                 }
             }
@@ -160,6 +171,9 @@ public class InventoryService {
         return Map.of(
                 "received", received,
                 "sold", sold,
+                "returns", returns,
+                "transfers", transfers,
+                "adjustments", adjustments,
                 "period", days + " days"
         );
     }

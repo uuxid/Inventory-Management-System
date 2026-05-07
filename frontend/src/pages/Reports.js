@@ -58,8 +58,8 @@ export default function Reports() {
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#0f172a' }}>Reports</h1>
         <div style={{ display: 'flex', gap: 10 }}>
           <button style={btnStyle('#3b82f6')}
-            onClick={() => exportFile('products/export', 'products.xlsx')}>
-            ↓ Export Products (Excel)
+            onClick={() => exportFile('products/export', 'products.doc')}>
+            ↓ Export Products (Word)
           </button>
           <button style={btnStyle('#10b981')}
             onClick={() => exportFile('stock-movements/export', 'movements.xlsx')}>

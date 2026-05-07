@@ -9,6 +9,7 @@ export default function AuditLogs() {
   const [filterEntityType, setFilterEntityType] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('DATE_DESC');
+  const [selectedLog, setSelectedLog] = useState(null);
 
   useEffect(() => {
     loadLogs();
@@ -90,6 +91,25 @@ export default function AuditLogs() {
       if (upperAction.includes(key)) return color;
     }
     return '#64748b';
+  };
+
+  const parseValue = (value) => {
+    if (!value) return null;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  };
+
+  const renderParsedValue = (value) => {
+    if (value == null || value === '') {
+      return 'No value';
+    }
+    if (typeof value === 'string') {
+      return value;
+    }
+    return JSON.stringify(value, null, 2);
   };
 
   return (
@@ -233,18 +253,26 @@ export default function AuditLogs() {
                   {log.ipAddress || '—'}
                 </td>
                 <td style={{ padding: '12px 16px', fontSize: 11 }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {log.oldValue && (
-                      <div style={{ color: '#dc2626' }} title={log.oldValue}>
-                        Old: {log.oldValue.substring(0, 20)}...
-                      </div>
-                    )}
-                    {log.newValue && (
-                      <div style={{ color: '#059669' }} title={log.newValue}>
-                        New: {log.newValue.substring(0, 20)}...
-                      </div>
-                    )}
-                  </div>
+                  {(log.oldValue || log.newValue) ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedLog(log)}
+                      style={{
+                        background: '#eff6ff',
+                        color: '#1d4ed8',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: 6,
+                        padding: '6px 10px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      View changes
+                    </button>
+                  ) : (
+                    <span style={{ color: '#94a3b8' }}>No changes</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -255,6 +283,80 @@ export default function AuditLogs() {
       <div style={{ marginTop: 16, color: '#64748b', fontSize: 12 }}>
         Showing {filteredLogs.length} of {logs.length} audit logs
       </div>
+
+      {selectedLog && (
+        <div
+          onClick={() => setSelectedLog(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(900px, 100%)',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              background: '#ffffff',
+              borderRadius: 12,
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
+              padding: 18
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: '#0f172a' }}>Actual Changes</h3>
+              <button
+                type="button"
+                onClick={() => setSelectedLog(null)}
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 6,
+                  padding: '6px 10px',
+                  cursor: 'pointer',
+                  fontSize: 12
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 12, fontSize: 12, color: '#475569' }}>
+              <strong>User:</strong> {selectedLog.username || '—'} &nbsp;|&nbsp;
+              <strong>Action:</strong> {selectedLog.action || '—'} &nbsp;|&nbsp;
+              <strong>Entity:</strong> {selectedLog.entityType || '—'} #{selectedLog.entityId || '—'}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ border: '1px solid #fecaca', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ background: '#fef2f2', color: '#b91c1c', fontWeight: 700, fontSize: 12, padding: '8px 10px' }}>
+                  Old Value
+                </div>
+                <pre style={{ margin: 0, padding: 12, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {renderParsedValue(parseValue(selectedLog.oldValue))}
+                </pre>
+              </div>
+
+              <div style={{ border: '1px solid #bbf7d0', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ background: '#f0fdf4', color: '#15803d', fontWeight: 700, fontSize: 12, padding: '8px 10px' }}>
+                  New Value
+                </div>
+                <pre style={{ margin: 0, padding: 12, fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {renderParsedValue(parseValue(selectedLog.newValue))}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

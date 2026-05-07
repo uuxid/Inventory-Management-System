@@ -4,6 +4,38 @@
   padding: 0;
 }
 
+:root {
+  --focus-color: #3b82f6;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
+  --selection-bg: rgba(59, 130, 246, 0.18);
+  --selection-color: #0f172a;
+}
+
+body.role-admin {
+  --focus-color: #4f46e5;
+  --scrollbar-thumb: #a5b4fc;
+  --scrollbar-thumb-hover: #6366f1;
+  --selection-bg: rgba(79, 70, 229, 0.2);
+  --selection-color: #1e1b4b;
+}
+
+body.role-manager {
+  --focus-color: #0f766e;
+  --scrollbar-thumb: #99f6e4;
+  --scrollbar-thumb-hover: #14b8a6;
+  --selection-bg: rgba(20, 184, 166, 0.2);
+  --selection-color: #042f2e;
+}
+
+body.role-employee {
+  --focus-color: #c2410c;
+  --scrollbar-thumb: #fdba74;
+  --scrollbar-thumb-hover: #ea580c;
+  --selection-bg: rgba(234, 88, 12, 0.2);
+  --selection-color: #7c2d12;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
   background: #f8fafc;
@@ -16,7 +48,7 @@ input, select, textarea, button {
 }
 
 input:focus, select:focus, textarea:focus {
-  outline: 2px solid #3b82f6;
+  outline: 2px solid var(--focus-color);
   outline-offset: 0;
 }
 
@@ -45,5 +77,10 @@ a {
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-color);
+}
