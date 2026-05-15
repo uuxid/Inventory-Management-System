@@ -2,51 +2,77 @@ package com.inventory.service;
 
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
-
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.stream.Collectors;
+
 import com.inventory.dto.AiChatRequest;
-import com.inventory.model.AiAlert;
-import com.inventory.model.Product;
-import com.inventory.model.User;
-import com.inventory.model.enums.AlertSeverity;
-import com.inventory.model.enums.AlertType;
-import com.inventory.repository.AiAlertRepository;
-import com.inventory.repository.ProductRepository;
-import com.inventory.repository.UserRepository;
+import com.inventory.model.*;
+import com.inventory.model.enums.*;
+import com.inventory.repository.*;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j // Ensure you have Lombok for this
+@Slf4j
 public class AIIntegrationService {
 
     private final ProductRepository productRepo;
-    private final UserRepository userRepo;        // Added missing repo
-    private final AiAlertRepository alertRepo;    // Added missing repo
-    private final ChatModel chatModel;            // Spring AI
-    // private final TimeGptForecastService timeGptForecastService; // Add if you have this service
+    private final UserRepository userRepo;
+    private final AiAlertRepository alertRepo;
+    private final SupplierRepository supplierRepo;
+    private final StockMovementRepository stockMovementRepo;
+    private final PurchaseOrderRepository purchaseOrderRepo;
+    private final CategoryRepository categoryRepo;
+    private final AuditLogRepository auditLogRepo;
+
+    private final ChatModel chatModel;
 
     public String chat(AiChatRequest request, String username) {
-        List<Product> lowStock = productRepo.findLowStockProducts();
+        log.info("Processing AI Chat Request for user: {}", username);
 
+        // 1. Compile clean, summarized data from all repositories
+        String lowStockContext = buildLowStockContext();
+        String supplierContext = buildSupplierContext();
+        String pendingOrdersContext = buildPendingOrdersContext();
+        String recentMovementsContext = buildRecentMovementsContext();
+
+        // 2. Build the System Instructions
         String systemInstructions = """
-            You are GODAM-E, a professional grocery inventory assistant. 
-            Here is the current low-stock data: %s.
-            Use this data to answer the user's question accurately. 
-            Be concise and helpful.
-            """.formatted(lowStock.toString());
+            You are GODAM-E, an advanced, professional grocery inventory intelligence assistant.
+            You have access to the real-time operational state of the warehouse outlined below.
+            
+            [SYSTEM CONTEXT DATA]
+            
+            CRITICAL STOCK ALERTS:
+            %s
+            
+            ACTIVE SUPPLIERS:
+            %s
+            
+            PENDING REORDERS / PURCHASE ORDERS:
+            %s
+            
+            RECENT MOVEMENT AGGREGATION (Last 30 Days):
+            %s
+            
+            [INSTRUCTIONS]
+            - Answer the user's questions strictly using the system context data provided above.
+            - Be highly concise, data-driven, professional, and clear.
+            - If details on specific metrics are missing or not explicitly given, state that you cannot see that slice of data.
+            - Provide recommendations if a user inquires about critical low-stock items or bottlenecks.
+            """.formatted(lowStockContext, supplierContext, pendingOrdersContext, recentMovementsContext);
 
-
+        // 3. Dispatch to your Groq/Llama-3 model
         return chatModel.call(new Prompt(
                 List.of(
                         new SystemMessage(systemInstructions),
@@ -55,6 +81,65 @@ public class AIIntegrationService {
         )).getResult().getOutput().getText();
     }
 
+    // ── Context Builder Helpers ────────────────────────────────────
+
+    private String buildLowStockContext() {
+        List<Product> lowStock = productRepo.findLowStockProducts();
+        if (lowStock.isEmpty()) {
+            return "No items are currently under the low stock threshold.";
+        }
+        return lowStock.stream()
+                .map(p -> String.format("- %s (SKU: %s) | Qty Available: %d | Reorder Trigger: %d | Target Qty: %d",
+                        p.getName(), p.getSku(), safeInt(p.getQuantityOnHand()), safeInt(p.getReorderLevel()), safeInt(p.getReorderQuantity())))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private String buildSupplierContext() {
+        List<Supplier> activeSuppliers = supplierRepo.findByIsActiveTrue();
+        if (activeSuppliers.isEmpty()) {
+            return "No active suppliers recorded.";
+        }
+        return activeSuppliers.stream()
+                .map(s -> String.format("- %s (Lead Time: %s days)", s.getName(),
+                        s.getLeadTimeDays() != null ? s.getLeadTimeDays() : "N/A"))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private String buildPendingOrdersContext() {
+        // Find orders that are currently pending/processing (Adjust OrderStatus mapping to match your enum names)
+        List<PurchaseOrder> pendingOrders = purchaseOrderRepo.findAll().stream()
+                .filter(po -> po.getStatus() != OrderStatus.ORDERED && po.getStatus() != OrderStatus.CANCELLED)
+                .limit(10)
+                .toList();
+
+        if (pendingOrders.isEmpty()) {
+            return "No active or pending purchase orders in transit.";
+        }
+        return pendingOrders.stream()
+                .map(po -> String.format("- PO #%d | Status: %s | Supplier ID: %s",
+                        po.getId(), po.getStatus(), po.getSupplier() != null ? po.getSupplier().getId() : "Unknown"))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private String buildRecentMovementsContext() {
+        // Aggregate movements from the past 30 days
+        LocalDateTime thirtyDaysAgo = LocalDateTime.now().minusDays(30);
+        List<Object[]> aggregates = stockMovementRepo.aggregateMovementsByType(thirtyDaysAgo);
+
+        if (aggregates.isEmpty()) {
+            return "No stock movements recorded in the last 30 days.";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (Object[] row : aggregates) {
+            String type = row[0] != null ? row[0].toString() : "UNKNOWN";
+            String qty = row[1] != null ? row[1].toString() : "0";
+            builder.append(String.format("- Type: %s | Gross Quantity Moved: %s\n", type, qty));
+        }
+        return builder.toString();
+    }
+
+    // ── Generate daily AI alerts ───────────────────────────────────
     @Transactional
     public void generateAlerts() {
         log.info("Running AI alert generation...");
@@ -89,8 +174,8 @@ public class AIIntegrationService {
         }
     }
 
+    // ── Demand forecast ────────────────────────────────────────────
     public String getDemandForecast() {
-        // Fallback logic if TimeGPT service is missing or fails
         List<Product> products = productRepo.findByIsActiveTrue();
         StringBuilder summary = new StringBuilder();
         summary.append("Basic stock-based forecast:\n");
@@ -111,6 +196,7 @@ public class AIIntegrationService {
         return summary.toString();
     }
 
+    // ── Auto-categorize product ────────────────────────────────────
     public String suggestCategory(String productName, String description) {
         String text = (productName + " " + description).toLowerCase(Locale.ROOT);
         if (containsAny(text, "juice", "tea", "coffee", "cola", "water", "beverage", "drink", "soda", "lassi")) {
@@ -153,4 +239,4 @@ public class AIIntegrationService {
         }
         return AlertSeverity.WARNING;
     }
-} // End of class
+}
