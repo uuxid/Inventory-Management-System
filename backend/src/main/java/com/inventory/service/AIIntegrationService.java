@@ -24,130 +24,32 @@ import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class AIIntegrationService {
 
     private final ProductRepository productRepo;
-    private final AiAlertRepository alertRepo;
-    private final UserRepository userRepo;
-    private final TimeGptForecastService timeGptForecastService;
+    private final ChatModel chatModel; // Injected from Spring AI
 
-    // ── AI Chat assistant ──────────────────────────────────────────
     public String chat(AiChatRequest request, String username) {
-        List<Product> activeProducts = productRepo.findByIsActiveTrue();
+        // 1. Gather the "Context" (The data the AI needs to know)
         List<Product> lowStock = productRepo.findLowStockProducts();
-        long totalProducts = activeProducts.size();
-        String rawMessage = request.getMessage() == null ? "" : request.getMessage().trim();
-        String question = rawMessage.toLowerCase(Locale.ROOT);
-        String displayName = toDisplayName(username);
+        
+        // 2. Create a "System Prompt" (The instructions for the AI)
+        String systemInstructions = """
+            You are GODAM-E, a professional grocery inventory assistant. 
+            Here is the current low-stock data: %s.
+            Use this data to answer the user's question accurately. 
+            Be concise and helpful.
+            """.formatted(lowStock.toString());
 
-        BigDecimal totalCostValue = activeProducts.stream()
-            .map(p -> safeMoney(p.getCostPrice()).multiply(BigDecimal.valueOf(safeInt(p.getQuantityOnHand()))))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal totalSalesValue = activeProducts.stream()
-            .map(p -> safeMoney(p.getUnitPrice()).multiply(BigDecimal.valueOf(safeInt(p.getQuantityOnHand()))))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-        BigDecimal potentialProfit = totalSalesValue.subtract(totalCostValue);
-        BigDecimal marginPercent = totalSalesValue.compareTo(BigDecimal.ZERO) > 0
-            ? potentialProfit.multiply(BigDecimal.valueOf(100)).divide(totalSalesValue, 2, RoundingMode.HALF_UP)
-            : BigDecimal.ZERO;
-
-        if (question.isBlank()) {
-            return "I am here to help, " + displayName + ". Ask me about low stock, reorder, supplier priority, available products, profit status, or demand forecast.";
-        }
-
-        if (isGreeting(question)) {
-            return "Namaste " + displayName + "! I am your GODAM-E grocery helper. "
-                    + "How can I help today with stock, reorder, supplier priority, product availability, profit, or forecast?";
-        }
-
-        if (question.contains("help") || question.contains("what can you do") || question.contains("how can you help")) {
-            return "I can help you quickly with:\n"
-                    + "- low-stock and reorder suggestions\n"
-                    + "- supplier priority guidance\n"
-                    + "- available product checks\n"
-                    + "- profit status and margin\n"
-                    + "- demand forecast\n"
-                    + "Try: 'show low stock', 'profit status', or 'which supplier should I prioritize'.";
-        }
-
-        if (question.contains("profit") || question.contains("margin") || question.contains("earn")) {
-            StringBuilder reply = new StringBuilder();
-            reply.append("Profit details (based on current on-hand stock):\n");
-            reply.append("- Total cost value: ").append(formatMoney(totalCostValue)).append("\n");
-            reply.append("- Total sales value: ").append(formatMoney(totalSalesValue)).append("\n");
-            reply.append("- Potential gross profit: ").append(formatMoney(potentialProfit)).append("\n");
-            reply.append("- Potential gross margin: ").append(marginPercent).append("%\n");
-            reply.append("Tip: this is stock-based potential profit, not booked sales profit.");
-            return reply.toString();
-        }
-
-        if (question.contains("summary") || question.contains("overview") || question.contains("status")) {
-            return buildSummary(totalProducts, lowStock.size(), potentialProfit, marginPercent);
-        }
-
-        if (question.contains("low stock") || question.contains("reorder") || question.contains("stock")) {
-            StringBuilder reply = new StringBuilder();
-            if (lowStock.isEmpty()) {
-                reply.append("All products are currently above reorder level.");
-            } else {
-                reply.append("Items needing attention:\n");
-                lowStock.stream()
-                        .sorted(Comparator.comparing(Product::getQuantityOnHand, Comparator.nullsLast(Integer::compareTo)))
-                        .limit(5)
-                        .forEach(p -> reply.append("- ")
-                                .append(p.getName())
-                                .append(" (SKU: ").append(p.getSku()).append(")")
-                                .append(" qty=").append(safeInt(p.getQuantityOnHand()))
-                                .append(" / reorder level=").append(safeInt(p.getReorderLevel()))
-                                .append(" / suggested reorder qty=").append(safeInt(p.getReorderQuantity()))
-                                .append("\n"));
-            }
-            return reply.toString();
-        }
-
-        if (question.contains("supplier") || question.contains("priority")) {
-            if (lowStock.isEmpty()) {
-                return "No urgent supplier action needed right now. All active products are above reorder level.";
-            }
-            StringBuilder reply = new StringBuilder("Supplier priority suggestions based on low stock:\n");
-            lowStock.stream()
-                    .sorted(Comparator.comparing(Product::getQuantityOnHand, Comparator.nullsLast(Integer::compareTo)))
-                    .limit(5)
-                    .forEach(p -> reply.append("- ")
-                            .append(p.getSupplier() != null ? p.getSupplier().getName() : "Unknown supplier")
-                            .append(" -> ")
-                            .append(p.getName())
-                            .append(" (qty=").append(safeInt(p.getQuantityOnHand()))
-                            .append(", reorder=").append(safeInt(p.getReorderLevel()))
-                            .append(")\n"));
-            return reply.toString();
-        }
-
-        if (question.contains("product") || question.contains("search") || question.contains("available")) {
-            StringBuilder reply = new StringBuilder();
-            reply.append("Top available products:\n");
-            activeProducts.stream().limit(5).forEach(p -> reply.append("- ")
-                    .append(p.getName())
-                    .append(" (SKU: ").append(p.getSku()).append(")")
-                    .append(" qty=").append(safeInt(p.getQuantityOnHand()))
-                    .append("\n"));
-            return reply.toString();
-        }
-
-        if (question.contains("forecast") || question.contains("demand")) {
-            return getDemandForecast();
-        }
-
-        if (question.contains("thank")) {
-            return "You are welcome, " + displayName + ". I am always here to help with your grocery operations.";
-        }
-
-        return "I am here to help, " + displayName + ". I did not fully understand that yet. "
-                + "Try asking: low stock, reorder, supplier priority, available products, profit status, or forecast.";
+        // 3. Call the AI
+        return chatModel.call(new Prompt(
+            List.of(
+                new SystemMessage(systemInstructions),
+                new UserMessage(request.getMessage())
+            )
+        )).getResult().getOutput().getContent();
     }
+}
 
     // ── Generate daily AI alerts ───────────────────────────────────
     @Transactional
