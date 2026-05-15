@@ -20,6 +20,7 @@ This folder is a separate mobile-app starter for the inventory system. It is int
 ```bash
 cd "android frontend"
 npm install
+npx expo install expo-camera
 npx expo start
 ```
 
