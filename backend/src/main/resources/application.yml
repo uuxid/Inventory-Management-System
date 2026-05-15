@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: GODAM-E
+  config:
+    import: optional:file:../.env
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:inventory_db}?options=-c%20TimeZone%3DUTC
+    username: ${DB_USERNAME:inventory_user}
+    password: ${DB_PASSWORD:inventory_pass}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 60000
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: ${BACKEND_PORT:8080}
+  address: ${BACKEND_ADDRESS:0.0.0.0}
+  error:
+    include-message: always
+
+app:
+  backend-public-url: ${BACKEND_PUBLIC_URL:http://192.168.1.11:8080}
+  jwt:
+    secret: ${JWT_SECRET:mySecretKeyForInventoryManagementSystem2024VeryLongKey}
+    expiration: 86400000
+  ai:
+    anthropic-api-key: ${ANTHROPIC_API_KEY:your-api-key-here}
+    model: claude-sonnet-4-6
+    base-url: https://api.anthropic.com/v1/messages
+    timegpt:
+      enabled: ${TIMEGPT_ENABLED:false}
+      api-key: ${TIMEGPT_API_KEY:}
+      base-url: ${TIMEGPT_BASE_URL:https://api.nixtla.io/forecast}
+      model: ${TIMEGPT_MODEL:timegpt-1}
+      horizon-days: ${TIMEGPT_HORIZON_DAYS:30}
+      history-days: ${TIMEGPT_HISTORY_DAYS:120}
+      cache-minutes: ${TIMEGPT_CACHE_MINUTES:720}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001,http://localhost:5173}
+
+logging:
+  level:
+    com.inventory: DEBUG
+    org.springframework.security: INFO
