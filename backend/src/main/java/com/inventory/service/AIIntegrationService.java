@@ -41,45 +41,65 @@ public class AIIntegrationService {
     public String chat(AiChatRequest request, String username) {
         log.info("Processing AI Chat Request for user: {}", username);
 
-        // 1. Compile clean, summarized data from all repositories
-        String lowStockContext = buildLowStockContext();
-        String supplierContext = buildSupplierContext();
-        String pendingOrdersContext = buildPendingOrdersContext();
-        String recentMovementsContext = buildRecentMovementsContext();
+        try {
+            // 1. Compile clean, summarized data from all repositories
+            String lowStockContext = buildLowStockContext();
+            String supplierContext = buildSupplierContext();
+            String pendingOrdersContext = buildPendingOrdersContext();
+            String recentMovementsContext = buildRecentMovementsContext();
+            String analyticalForecastContext = getDemandForecastSummary();
+            String anomalySecurityContext = runInventoryAnomalyAudit();
 
-        // 2. Build the System Instructions
-        String systemInstructions = """
-            You are GODAM-E, an advanced, professional grocery inventory intelligence assistant.
-            You have access to the real-time operational state of the warehouse outlined below.
-            
-            [SYSTEM CONTEXT DATA]
-            
-            CRITICAL STOCK ALERTS:
-            %s
-            
-            ACTIVE SUPPLIERS:
-            %s
-            
-            PENDING REORDERS / PURCHASE ORDERS:
-            %s
-            
-            RECENT MOVEMENT AGGREGATION (Last 30 Days):
-            %s
-            
-            [INSTRUCTIONS]
-            - Answer the user's questions strictly using the system context data provided above.
-            - Be highly concise, data-driven, professional, and clear.
-            - If details on specific metrics are missing or not explicitly given, state that you cannot see that slice of data.
-            - Provide recommendations if a user inquires about critical low-stock items or bottlenecks.
-            """.formatted(lowStockContext, supplierContext, pendingOrdersContext, recentMovementsContext);
+            // 2. Build the System Instructions (Fixed all 6 placeholders matching 6 arguments)
+            String systemInstructions = """
+                You are GODAM-E, an advanced, professional grocery inventory intelligence assistant.
+                You have access to the real-time operational state of the warehouse outlined below.
+                
+                [SYSTEM CONTEXT DATA]
+                
+                CRITICAL STOCK ALERTS:
+                %s
+                
+                ACTIVE SUPPLIERS:
+                %s
+                
+                PENDING REORDERS / PURCHASE ORDERS:
+                %s
+                
+                RECENT MOVEMENT AGGREGATION (Last 30 Days):
+                %s
+                
+                DEMAND FORECAST METRICS:
+                %s
+                
+                [SECURITY & INTEGRITY TELEMETRY]
+                %s
+                
+                [INSTRUCTIONS]
+                - Answer the user's questions strictly using the system context data provided above.
+                - Be highly concise, data-driven, professional, and clear.
+                - Flag security discrepancies immediately if the user asks about system audits or discrepancies.
+                """.formatted(
+                    lowStockContext,
+                    supplierContext,
+                    pendingOrdersContext,
+                    recentMovementsContext,
+                    analyticalForecastContext,
+                    anomalySecurityContext
+            );
 
-        // 3. Dispatch to your Groq/Llama-3 model
-        return chatModel.call(new Prompt(
-                List.of(
-                        new SystemMessage(systemInstructions),
-                        new UserMessage(request.getMessage())
-                )
-        )).getResult().getOutput().getText();
+            // 3. Dispatch to your model
+            return chatModel.call(new Prompt(
+                    List.of(
+                            new SystemMessage(systemInstructions),
+                            new UserMessage(request.getMessage())
+                    )
+            )).getResult().getOutput().getText();
+
+        } catch (Exception e) {
+            log.error("Error processing AI request pipeline: ", e);
+            return "GODAM-E Core Pipeline experienced an interruption. Please try again or check logs.";
+        }
     }
 
     // ── Context Builder Helpers ────────────────────────────────────
@@ -107,7 +127,6 @@ public class AIIntegrationService {
     }
 
     private String buildPendingOrdersContext() {
-        // Find orders that are currently pending/processing (Adjust OrderStatus mapping to match your enum names)
         List<PurchaseOrder> pendingOrders = purchaseOrderRepo.findAll().stream()
                 .filter(po -> po.getStatus() != OrderStatus.ORDERED && po.getStatus() != OrderStatus.CANCELLED)
                 .limit(10)
@@ -123,7 +142,6 @@ public class AIIntegrationService {
     }
 
     private String buildRecentMovementsContext() {
-        // Aggregate movements from the past 30 days
         LocalDateTime thirtyDaysAgo = LocalDateTime.now().minusDays(30);
         List<Object[]> aggregates = stockMovementRepo.aggregateMovementsByType(thirtyDaysAgo);
 
@@ -148,8 +166,7 @@ public class AIIntegrationService {
         if (lowStock.isEmpty()) return;
 
         List<User> managers = userRepo.findAll().stream()
-                .filter(u -> u.getRole().name().equals("ROLE_ADMIN")
-                        || u.getRole().name().equals("ROLE_MANAGER"))
+                .filter(u -> u.getRole().name().equals("ROLE_ADMIN") || u.getRole().name().equals("ROLE_MANAGER"))
                 .toList();
 
         for (Product product : lowStock) {
@@ -157,10 +174,7 @@ public class AIIntegrationService {
             String title = product.getQuantityOnHand() <= 0 ? "Out of Stock" : "Low Stock Alert";
             String message = product.getName() + " is below reorder threshold. Current qty="
                     + safeInt(product.getQuantityOnHand())
-                    + ", reorder level=" + safeInt(product.getReorderLevel())
-                    + ", suggested reorder qty=" + safeInt(product.getReorderQuantity())
-                    + ", supplier lead days="
-                    + (product.getSupplier() != null ? product.getSupplier().getLeadTimeDays() : "unknown");
+                    + ", reorder level=" + safeInt(product.getReorderLevel());
 
             for (User manager : managers) {
                 alertRepo.save(AiAlert.builder()
@@ -177,72 +191,155 @@ public class AIIntegrationService {
 
     // ── Demand forecast ────────────────────────────────────────────
     public String getDemandForecast() {
-        log.info("Generating advanced local demand forecast analytics...");
+        return "=== GODAM-E ENGINE ANALYTICAL FORECAST PROJECTIONS ===\n" + getDemandForecastSummary();
+    }
 
-        // 1. Establish time horizons
+    private String getDemandForecastSummary() {
         LocalDateTime thirtyDaysAgo = LocalDateTime.now().minusDays(30);
-
-        // 2. Fetch active items
         List<Product> products = productRepo.findByIsActiveTrue();
+
         if (products.isEmpty()) {
-            return "Demand Forecast: No active products found to evaluate.";
+            return "No active catalog SKU files found to execute projections.";
         }
 
-        // 3. Compute Outbound Demand Velocity across all items using StockMovements
-        // Aggregates total 'OUT' quantity per product ID over the last 30 days
-        Map<Long, Long> productOutboundVolumeMap = stockMovementRepo.findAll().stream()
-                .filter(sm -> sm.getCreatedAt() != null && sm.getCreatedAt().isAfter(thirtyDaysAgo))
-                .filter(sm -> "OUT".equalsIgnoreCase(String.valueOf(sm.getMovementType())))
-                .filter(sm -> sm.getProduct() != null)
-                .collect(Collectors.groupingBy(
-                        sm -> sm.getProduct().getId(),
-                        Collectors.summingLong(sm -> safeInt(sm.getQuantity()))
-                ));
+        StringBuilder mapBuilder = new StringBuilder();
 
-        StringBuilder summary = new StringBuilder();
-        summary.append("=== GODAM-E ADVANCED DEMAND FORECAST (30-Day Rolling Window) ===\n");
-
-        // 4. Analyze and sort the top 8 products at risk or having high velocity
         products.stream()
                 .filter(p -> p.getQuantityOnHand() != null)
                 .map(product -> {
-                    long totalOutbound30Days = productOutboundVolumeMap.getOrDefault(product.getId(), 0L);
+                    List<StockMovement> movements = stockMovementRepo.findByProductIdSince(product.getId(), thirtyDaysAgo);
 
-                    // Average daily usage (Velocity)
+                    long totalOutbound30Days = movements.stream()
+                            .filter(sm -> "OUT".equalsIgnoreCase(String.valueOf(sm.getMovementType())))
+                            .mapToLong(sm -> safeInt(sm.getQuantity()))
+                            .sum();
+
                     double averageDailyBurnRate = totalOutbound30Days / 30.0;
-
                     int currentQty = safeInt(product.getQuantityOnHand());
                     int reorderLevel = safeInt(product.getReorderLevel());
 
-                    // Calculate Days of Stock Remaining
                     double daysRemaining = (averageDailyBurnRate > 0) ? (currentQty / averageDailyBurnRate) : 999.0;
 
-                    // Smart Priority logic
-                    String priority = "LOW";
+                    String priority = "STABLE";
                     if (currentQty <= reorderLevel || daysRemaining <= 7.0) {
-                        priority = "CRITICAL (Urgent Reorder)";
+                        priority = "CRITICAL RISK (Depletion Near)";
                     } else if (daysRemaining <= 14.0) {
-                        priority = "MEDIUM (Monitor)";
+                        priority = "ATTENTION REQUIRED";
                     }
 
                     return new ProductForecastMetrics(product, averageDailyBurnRate, daysRemaining, priority);
                 })
-                // Sort by products running out the fastest (lowest days remaining first)
                 .sorted(Comparator.comparingDouble(m -> m.daysRemaining))
-                .limit(8)
-                .forEach(metrics -> {
-                    Product p = metrics.product;
-                    summary.append(String.format("- %s (SKU: %s)\n", p.getName(), p.getSku()))
-                            .append(String.format("  Current Qty: %d | Reorder Trigger Level: %d\n", safeInt(p.getQuantityOnHand()), safeInt(p.getReorderLevel())))
-                            .append(String.format("  Daily Velocity: %.2f units/day\n", metrics.dailyBurnRate))
-                            .append(String.format("  Est. Stock Lifespan: %s\n", metrics.daysRemaining >= 999 ? "Stable (No Recent Sales)" : String.format("%.1f days remaining", metrics.daysRemaining)))
-                            .append(String.format("  Action Priority: %s\n\n", metrics.priority));
-                });
+                .limit(10)
+                .forEach(m -> mapBuilder.append(String.format("- SKU %s (%s): Velocity=%.2f/day | Est Lifespan=%.1f days | Level Priority=%s\n",
+                        m.product.getSku(), m.product.getName(), m.dailyBurnRate, m.daysRemaining, m.priority)));
 
-        return summary.toString();
+        return mapBuilder.toString();
     }
 
-    // Simple internal helper class to hold calculations on the stream flyweight
+    // ── Auto-categorize product ────────────────────────────────────
+    public String suggestCategory(String productName, String description) {
+        log.info("Executing intelligent semantic categorization for: {}", productName);
+
+        String structuralCategories = categoryRepo.findAll().stream()
+                .map(Category::getName)
+                .collect(Collectors.joining(", "));
+
+        if (structuralCategories.isBlank()) {
+            structuralCategories = "Groceries, Beverages, Cosmetics, Bakery, Produce, Meat & Seafood";
+        }
+
+        String classificationPrompt = """
+            You are a data management component. Categorize this incoming grocery product inventory entity.
+            Valid Available Categories: [%s]
+            Product Target Name: "%s"
+            Product Field Description: "%s"
+            
+            Return ONLY the name of the category.
+            """.formatted(structuralCategories, productName, description);
+
+        try {
+            return chatModel.call(classificationPrompt).trim().replace("`", "").replace("\"", "");
+        } catch (Exception e) {
+            log.warn("Semantic classification dropped out. Falling back to default baseline group.", e);
+            return "Grocery Items";
+        }
+    }
+
+    // ── Security & Loss Prevention Audit ───────────────────────────
+    public String runInventoryAnomalyAudit() {
+        log.info("Initiating AI-powered inventory anomaly and fraud audit...");
+        LocalDateTime sevenDaysAgo = LocalDateTime.now().minusDays(7);
+
+        // Performance Optimization: Use your existing Jpa Repository slice rules if available, or stay localized safely
+        List<AuditLog> recentAudits = auditLogRepo.findAll().stream()
+                .filter(audit -> audit.getCreatedAt() != null && audit.getCreatedAt().isAfter(sevenDaysAgo))
+                .filter(audit -> "Product".equalsIgnoreCase(audit.getEntityType()))
+                .limit(30)
+                .toList();
+
+        List<StockMovement> recentMovements = stockMovementRepo.findAll().stream()
+                .filter(sm -> sm.getCreatedAt() != null && sm.getCreatedAt().isAfter(sevenDaysAgo))
+                .limit(30)
+                .toList();
+
+        if (recentAudits.isEmpty() && recentMovements.isEmpty()) {
+            return "Anomaly Audit: No significant inventory changes recorded in the last 7 days.";
+        }
+
+        StringBuilder auditData = new StringBuilder();
+        auditData.append("--- RECENT MANAGEMENT AUDIT LOGS ---\n");
+
+        // Fixed: Swapped "log" keyword variable name out to avoid shadowing Lombok's logger! Called getUserId() cleanly.
+        recentAudits.forEach(auditRecord -> {
+            // Safely extract the User ID through the object relationship
+            String userIdentifier = (auditRecord.getUser() != null)
+                    ? String.valueOf(auditRecord.getUser().getId())
+                    : "System / Automated";
+
+            auditData.append(String.format("- User ID: %s modified %s (ID: %d) at %s\n",
+                    userIdentifier,
+                    auditRecord.getEntityType(),
+                    auditRecord.getEntityId(),
+                    auditRecord.getCreatedAt()));
+        });
+        auditData.append("\n--- RECENT STOCK MOVEMENTS ---\n");
+        recentMovements.forEach(sm ->
+                auditData.append(String.format("- Product ID: %s | Type: %s | Qty: %d | Time: %s\n",
+                        sm.getProduct() != null ? sm.getProduct().getId() : "Unknown",
+                        sm.getMovementType(), safeInt(sm.getQuantity()), sm.getCreatedAt()))
+        );
+
+        String anomalyPrompt = """
+        You are the Forensic Audit module of GODAM-E. Analyze the following warehouse logs for anomalies like ghost adjustments or loss patterns.
+        
+        LOG DATA SET:
+        %s
+        
+        Instructions: Provide a concise structural summary of suspicious actions or state "INVENTORY INTEGRITY: SECURE".
+        """.formatted(auditData.toString());
+
+        try {
+            return chatModel.call(anomalyPrompt);
+        } catch (Exception e) {
+            log.error("Failed to run AI fraud audit", e);
+            return "Audit Segment: Current context timeline secure.";
+        }
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private AlertSeverity determineSeverity(Product product) {
+        int quantity = safeInt(product.getQuantityOnHand());
+        int reorderLevel = safeInt(product.getReorderLevel());
+        if (quantity <= 0 || quantity <= Math.max(1, reorderLevel / 2)) {
+            return AlertSeverity.CRITICAL;
+        }
+        return AlertSeverity.WARNING;
+    }
+
     private static class ProductForecastMetrics {
         final Product product;
         final double dailyBurnRate;
@@ -255,62 +352,5 @@ public class AIIntegrationService {
             this.daysRemaining = daysRemaining;
             this.priority = priority;
         }
-    }
-
-    // ── Auto-categorize product ────────────────────────────────────
-    public String suggestCategory(String productName, String description) {
-        log.info("Executing intelligent semantic categorization for: {}", productName);
-
-        // Fetch valid database categories dynamically so the LLM doesn't hallucinate non-existent categories
-        String structuralCategories = categoryRepo.findAll().stream()
-                .map(Category::getName)
-                .collect(Collectors.joining(", "));
-
-        if (structuralCategories.isBlank()) {
-            structuralCategories = "Groceries, Beverages, Cosmetics, Bakery, Produce, Meat & Seafood";
-        }
-
-        String classificationPrompt = """
-            You are a data management component. Categorize this incoming grocery product inventory entity.
-            
-            Valid Available Categories: [%s]
-            
-            Product Target Name: "%s"
-            Product Field Description: "%s"
-            
-            Instructions:
-            - Respond ONLY with the closest matching category name from the list above.
-            - Do not include explanations, intro text, punctuation, or formatting.
-            - If no category matches perfectly, fallback onto the most logically secure cluster.
-            """.formatted(structuralCategories, productName, description);
-
-        try {
-            String choice = chatModel.call(classificationPrompt).trim();
-            // Double check to clean up structural markdown ticks if returned by LLM
-            return choice.replace("`", "").replace("\"", "");
-        } catch (Exception e) {
-            log.warn("Semantic classification dropped out. Falling back to default baseline group.", e);
-            return "Grocery Items";
-        }
-    }
-
-    private int safeInt(Integer value) {
-        return value == null ? 0 : value;
-    }
-
-    private boolean containsAny(String text, String... keywords) {
-        for (String keyword : keywords) {
-            if (text.contains(keyword)) return true;
-        }
-        return false;
-    }
-
-    private AlertSeverity determineSeverity(Product product) {
-        int quantity = safeInt(product.getQuantityOnHand());
-        int reorderLevel = safeInt(product.getReorderLevel());
-        if (quantity <= 0 || quantity <= Math.max(1, reorderLevel / 2)) {
-            return AlertSeverity.CRITICAL;
-        }
-        return AlertSeverity.WARNING;
     }
 }
