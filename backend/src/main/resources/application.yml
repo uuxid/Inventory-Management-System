@@ -31,11 +31,12 @@ spring:
 
 server:
   port: ${BACKEND_PORT:8080}
+  address: ${BACKEND_ADDRESS:0.0.0.0}
   error:
     include-message: always
 
 app:
-  backend-public-url: ${BACKEND_PUBLIC_URL:http://localhost:8080}
+  backend-public-url: ${BACKEND_PUBLIC_URL:http://192.168.1.11:8080}
   jwt:
     secret: ${JWT_SECRET:mySecretKeyForInventoryManagementSystem2024VeryLongKey}
     expiration: 86400000

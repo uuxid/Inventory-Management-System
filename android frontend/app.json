@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Inventory Mobile",
+    "slug": "inventory-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": ["android"],
+    "jsEngine": "hermes",
+    "android": {
+      "package": "com.inventory.mobile"
+    }
+  }
+}

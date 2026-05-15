@@ -17,7 +17,7 @@ public class FileStorageService {
     private final String backendPublicUrl;
 
     public FileStorageService(@Value("${app.upload-dir:uploads}") String uploadDir,
-                              @Value("${app.backend-public-url:http://localhost:8080}") String backendPublicUrl) {
+                              @Value("${app.backend-public-url:http://192.168.1.11:8080}") String backendPublicUrl) {
         this.uploadDir = Paths.get(uploadDir).toAbsolutePath().normalize();
         this.backendPublicUrl = backendPublicUrl;
     }
