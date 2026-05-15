@@ -1,11 +1,14 @@
 package com.inventory.service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,16 +27,18 @@ import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j // Ensure you have Lombok for this
 public class AIIntegrationService {
 
     private final ProductRepository productRepo;
-    private final ChatModel chatModel; // Injected from Spring AI
+    private final UserRepository userRepo;        // Added missing repo
+    private final AiAlertRepository alertRepo;    // Added missing repo
+    private final ChatModel chatModel;            // Spring AI
+    // private final TimeGptForecastService timeGptForecastService; // Add if you have this service
 
     public String chat(AiChatRequest request, String username) {
-        // 1. Gather the "Context" (The data the AI needs to know)
         List<Product> lowStock = productRepo.findLowStockProducts();
-        
-        // 2. Create a "System Prompt" (The instructions for the AI)
+
         String systemInstructions = """
             You are GODAM-E, a professional grocery inventory assistant. 
             Here is the current low-stock data: %s.
@@ -41,17 +46,15 @@ public class AIIntegrationService {
             Be concise and helpful.
             """.formatted(lowStock.toString());
 
-        // 3. Call the AI
-        return chatModel.call(new Prompt(
-            List.of(
-                new SystemMessage(systemInstructions),
-                new UserMessage(request.getMessage())
-            )
-        )).getResult().getOutput().getContent();
-    }
-}
 
-    // ── Generate daily AI alerts ───────────────────────────────────
+        return chatModel.call(new Prompt(
+                List.of(
+                        new SystemMessage(systemInstructions),
+                        new UserMessage(request.getMessage())
+                )
+        )).getResult().getOutput().getText();
+    }
+
     @Transactional
     public void generateAlerts() {
         log.info("Running AI alert generation...");
@@ -86,21 +89,12 @@ public class AIIntegrationService {
         }
     }
 
-    // ── Demand forecast ────────────────────────────────────────────
     public String getDemandForecast() {
-        String timeGptForecast = timeGptForecastService.buildForecastSummary();
-        if (timeGptForecast != null && !timeGptForecast.isBlank()) {
-            return timeGptForecast;
-        }
-
-        String reason = timeGptForecastService.getLastStatus();
-
+        // Fallback logic if TimeGPT service is missing or fails
         List<Product> products = productRepo.findByIsActiveTrue();
         StringBuilder summary = new StringBuilder();
-        summary.append("TimeGPT fallback mode. ")
-                .append(reason == null || reason.isBlank() ? "Reason unavailable." : "Reason: " + reason)
-                .append("\n")
-                .append("Basic stock-based forecast:\n");
+        summary.append("Basic stock-based forecast:\n");
+
         products.stream()
                 .filter(p -> p.getQuantityOnHand() != null)
                 .sorted(Comparator.comparing(Product::getQuantityOnHand))
@@ -117,7 +111,6 @@ public class AIIntegrationService {
         return summary.toString();
     }
 
-    // ── Auto-categorize product ────────────────────────────────────
     public String suggestCategory(String productName, String description) {
         String text = (productName + " " + description).toLowerCase(Locale.ROOT);
         if (containsAny(text, "juice", "tea", "coffee", "cola", "water", "beverage", "drink", "soda", "lassi")) {
@@ -141,59 +134,13 @@ public class AIIntegrationService {
         return "Grocery Items";
     }
 
-    private BigDecimal safeMoney(BigDecimal value) {
-        return value == null ? BigDecimal.ZERO : value;
-    }
-
-    private String formatMoney(BigDecimal amount) {
-        return "NRS " + safeMoney(amount).setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private String buildSummary(long totalProducts, int lowStockCount, BigDecimal potentialProfit, BigDecimal marginPercent) {
-        return "GODAM-E grocery summary:\n"
-                + "- Total active items: " + totalProducts + "\n"
-                + "- Low stock items: " + lowStockCount + "\n"
-                + "- Profit status (potential): " + formatMoney(potentialProfit)
-                + " (margin " + marginPercent.setScale(2, RoundingMode.HALF_UP) + "%)";
-    }
-
-    private String toDisplayName(String username) {
-        if (username == null || username.isBlank()) {
-            return "there";
-        }
-        String normalized = username.trim();
-        int atIndex = normalized.indexOf('@');
-        if (atIndex > 0) {
-            normalized = normalized.substring(0, atIndex);
-        }
-        if (normalized.isBlank()) {
-            return "there";
-        }
-        return Character.toUpperCase(normalized.charAt(0)) + normalized.substring(1);
-    }
-
-    private boolean isGreeting(String question) {
-        return question.equals("hi")
-                || question.equals("hello")
-                || question.equals("hey")
-                || question.equals("namaste")
-                || question.startsWith("hi ")
-                || question.startsWith("hello ")
-                || question.startsWith("hey ")
-                || question.startsWith("good morning")
-                || question.startsWith("good afternoon")
-                || question.startsWith("good evening");
-    }
-
     private int safeInt(Integer value) {
         return value == null ? 0 : value;
     }
 
     private boolean containsAny(String text, String... keywords) {
         for (String keyword : keywords) {
-            if (text.contains(keyword)) {
-                return true;
-            }
+            if (text.contains(keyword)) return true;
         }
         return false;
     }
@@ -201,12 +148,9 @@ public class AIIntegrationService {
     private AlertSeverity determineSeverity(Product product) {
         int quantity = safeInt(product.getQuantityOnHand());
         int reorderLevel = safeInt(product.getReorderLevel());
-        if (quantity <= 0) {
-            return AlertSeverity.CRITICAL;
-        }
-        if (quantity <= Math.max(1, reorderLevel / 2)) {
+        if (quantity <= 0 || quantity <= Math.max(1, reorderLevel / 2)) {
             return AlertSeverity.CRITICAL;
         }
         return AlertSeverity.WARNING;
     }
-}
+} // End of class

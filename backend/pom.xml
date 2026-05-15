@@ -18,7 +18,7 @@
 
   <properties>
     <java.version>21</java.version>
-    <jjwt.version>0.12.3</jjwt.version>
+    <jjwt.version>0.12.6</jjwt.version>
     <lombok.version>1.18.38</lombok.version>
   </properties>
 
@@ -66,10 +66,16 @@
       <scope>runtime</scope>
     </dependency>
 
-    <!-- Flyway -->
+    <!-- Flyway Core -->
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
+    </dependency>
+
+    <!-- ADD THIS TO FIX THE POSTGRESQL 16 SUPPORT -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
     </dependency>
 
     <!-- JWT -->
