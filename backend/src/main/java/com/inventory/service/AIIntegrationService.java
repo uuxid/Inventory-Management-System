@@ -259,26 +259,39 @@ public class AIIntegrationService {
 
     // ── Auto-categorize product ────────────────────────────────────
     public String suggestCategory(String productName, String description) {
-        String text = (productName + " " + description).toLowerCase(Locale.ROOT);
-        if (containsAny(text, "juice", "tea", "coffee", "cola", "water", "beverage", "drink", "soda", "lassi")) {
-            return "Beverages";
+        log.info("Executing intelligent semantic categorization for: {}", productName);
+
+        // Fetch valid database categories dynamically so the LLM doesn't hallucinate non-existent categories
+        String structuralCategories = categoryRepo.findAll().stream()
+                .map(Category::getName)
+                .collect(Collectors.joining(", "));
+
+        if (structuralCategories.isBlank()) {
+            structuralCategories = "Groceries, Beverages, Cosmetics, Bakery, Produce, Meat & Seafood";
         }
-        if (containsAny(text, "rice", "dal", "lentil", "flour", "sugar", "salt", "oil", "spice", "masala", "grocery")) {
+
+        String classificationPrompt = """
+            You are a data management component. Categorize this incoming grocery product inventory entity.
+            
+            Valid Available Categories: [%s]
+            
+            Product Target Name: "%s"
+            Product Field Description: "%s"
+            
+            Instructions:
+            - Respond ONLY with the closest matching category name from the list above.
+            - Do not include explanations, intro text, punctuation, or formatting.
+            - If no category matches perfectly, fallback onto the most logically secure cluster.
+            """.formatted(structuralCategories, productName, description);
+
+        try {
+            String choice = chatModel.call(classificationPrompt).trim();
+            // Double check to clean up structural markdown ticks if returned by LLM
+            return choice.replace("`", "").replace("\"", "");
+        } catch (Exception e) {
+            log.warn("Semantic classification dropped out. Falling back to default baseline group.", e);
             return "Grocery Items";
         }
-        if (containsAny(text, "shampoo", "soap", "cream", "lotion", "cosmetic", "face wash", "toothpaste")) {
-            return "Cosmetics";
-        }
-        if (containsAny(text, "spinach", "tomato", "potato", "onion", "cabbage", "cauliflower", "vegetable", "veg")) {
-            return "Veg Items";
-        }
-        if (containsAny(text, "chicken", "mutton", "fish", "buff", "meat", "egg", "prawn", "non veg")) {
-            return "Non Veg Items";
-        }
-        if (containsAny(text, "almond", "cashew", "walnut", "raisin", "pistachio", "dates", "dry fruit")) {
-            return "Dry Fruits";
-        }
-        return "Grocery Items";
     }
 
     private int safeInt(Integer value) {
