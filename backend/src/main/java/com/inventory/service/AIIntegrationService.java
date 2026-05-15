@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.inventory.dto.AiChatRequest;
@@ -176,24 +177,84 @@ public class AIIntegrationService {
 
     // ── Demand forecast ────────────────────────────────────────────
     public String getDemandForecast() {
-        List<Product> products = productRepo.findByIsActiveTrue();
-        StringBuilder summary = new StringBuilder();
-        summary.append("Basic stock-based forecast:\n");
+        log.info("Generating advanced local demand forecast analytics...");
 
+        // 1. Establish time horizons
+        LocalDateTime thirtyDaysAgo = LocalDateTime.now().minusDays(30);
+
+        // 2. Fetch active items
+        List<Product> products = productRepo.findByIsActiveTrue();
+        if (products.isEmpty()) {
+            return "Demand Forecast: No active products found to evaluate.";
+        }
+
+        // 3. Compute Outbound Demand Velocity across all items using StockMovements
+        // Aggregates total 'OUT' quantity per product ID over the last 30 days
+        Map<Long, Long> productOutboundVolumeMap = stockMovementRepo.findAll().stream()
+                .filter(sm -> sm.getCreatedAt() != null && sm.getCreatedAt().isAfter(thirtyDaysAgo))
+                .filter(sm -> "OUT".equalsIgnoreCase(String.valueOf(sm.getMovementType())))
+                .filter(sm -> sm.getProduct() != null)
+                .collect(Collectors.groupingBy(
+                        sm -> sm.getProduct().getId(),
+                        Collectors.summingLong(sm -> safeInt(sm.getQuantity()))
+                ));
+
+        StringBuilder summary = new StringBuilder();
+        summary.append("=== GODAM-E ADVANCED DEMAND FORECAST (30-Day Rolling Window) ===\n");
+
+        // 4. Analyze and sort the top 8 products at risk or having high velocity
         products.stream()
                 .filter(p -> p.getQuantityOnHand() != null)
-                .sorted(Comparator.comparing(Product::getQuantityOnHand))
+                .map(product -> {
+                    long totalOutbound30Days = productOutboundVolumeMap.getOrDefault(product.getId(), 0L);
+
+                    // Average daily usage (Velocity)
+                    double averageDailyBurnRate = totalOutbound30Days / 30.0;
+
+                    int currentQty = safeInt(product.getQuantityOnHand());
+                    int reorderLevel = safeInt(product.getReorderLevel());
+
+                    // Calculate Days of Stock Remaining
+                    double daysRemaining = (averageDailyBurnRate > 0) ? (currentQty / averageDailyBurnRate) : 999.0;
+
+                    // Smart Priority logic
+                    String priority = "LOW";
+                    if (currentQty <= reorderLevel || daysRemaining <= 7.0) {
+                        priority = "CRITICAL (Urgent Reorder)";
+                    } else if (daysRemaining <= 14.0) {
+                        priority = "MEDIUM (Monitor)";
+                    }
+
+                    return new ProductForecastMetrics(product, averageDailyBurnRate, daysRemaining, priority);
+                })
+                // Sort by products running out the fastest (lowest days remaining first)
+                .sorted(Comparator.comparingDouble(m -> m.daysRemaining))
                 .limit(8)
-                .forEach(p -> {
-                    String priority = p.getQuantityOnHand() <= safeInt(p.getReorderLevel()) ? "HIGH" : "LOW";
-                    summary.append("- ").append(p.getName())
-                            .append(" (SKU: ").append(p.getSku()).append(")")
-                            .append(" qty=").append(safeInt(p.getQuantityOnHand()))
-                            .append(" reorder level=").append(safeInt(p.getReorderLevel()))
-                            .append(" priority=").append(priority)
-                            .append("\n");
+                .forEach(metrics -> {
+                    Product p = metrics.product;
+                    summary.append(String.format("- %s (SKU: %s)\n", p.getName(), p.getSku()))
+                            .append(String.format("  Current Qty: %d | Reorder Trigger Level: %d\n", safeInt(p.getQuantityOnHand()), safeInt(p.getReorderLevel())))
+                            .append(String.format("  Daily Velocity: %.2f units/day\n", metrics.dailyBurnRate))
+                            .append(String.format("  Est. Stock Lifespan: %s\n", metrics.daysRemaining >= 999 ? "Stable (No Recent Sales)" : String.format("%.1f days remaining", metrics.daysRemaining)))
+                            .append(String.format("  Action Priority: %s\n\n", metrics.priority));
                 });
+
         return summary.toString();
+    }
+
+    // Simple internal helper class to hold calculations on the stream flyweight
+    private static class ProductForecastMetrics {
+        final Product product;
+        final double dailyBurnRate;
+        final double daysRemaining;
+        final String priority;
+
+        ProductForecastMetrics(Product product, double dailyBurnRate, double daysRemaining, String priority) {
+            this.product = product;
+            this.dailyBurnRate = dailyBurnRate;
+            this.daysRemaining = daysRemaining;
+            this.priority = priority;
+        }
     }
 
     // ── Auto-categorize product ────────────────────────────────────
